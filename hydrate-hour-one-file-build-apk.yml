@@ -1,0 +1,815 @@
+name: Build Hydrate Hour APK - One File Setup
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Generate project and build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Create Android project files
+        run: |
+          rm -rf app build.gradle.kts settings.gradle.kts
+          mkdir -p .
+          cat > settings.gradle.kts <<'HYDRATE_FILE_EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          
+          rootProject.name = "HydrateHour"
+          include(":app")
+          HYDRATE_FILE_EOF
+          mkdir -p .
+          cat > build.gradle.kts <<'HYDRATE_FILE_EOF'
+          plugins {
+              id("com.android.application") version "8.7.3" apply false
+              id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+              id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
+          }
+          HYDRATE_FILE_EOF
+          mkdir -p app
+          cat > app/build.gradle.kts <<'HYDRATE_FILE_EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+              id("org.jetbrains.kotlin.plugin.compose")
+          }
+          
+          android {
+              namespace = "com.example.hydratehour"
+              compileSdk = 35
+          
+              defaultConfig {
+                  applicationId = "com.example.hydratehour"
+                  minSdk = 26
+                  targetSdk = 35
+                  versionCode = 1
+                  versionName = "1.0.0"
+              }
+          
+              buildFeatures {
+                  compose = true
+              }
+          
+              packaging {
+                  resources {
+                      excludes += "/META-INF/{AL2.0,LGPL2.1}"
+                  }
+              }
+          }
+          
+          kotlin {
+              jvmToolchain(17)
+          }
+          
+          dependencies {
+              implementation(platform("androidx.compose:compose-bom:2025.08.00"))
+              implementation("androidx.activity:activity-compose:1.10.1")
+              implementation("androidx.core:core-ktx:1.15.0")
+              implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+          
+              implementation("androidx.compose.ui:ui")
+              implementation("androidx.compose.ui:ui-tooling-preview")
+              implementation("androidx.compose.material3:material3")
+          
+              debugImplementation("androidx.compose.ui:ui-tooling")
+          }
+          HYDRATE_FILE_EOF
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml <<'HYDRATE_FILE_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+          
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+          
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="Hydrate Hour"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:supportsRtl="true"
+                  android:theme="@style/Theme.HydrateHour">
+          
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+          
+                  <receiver
+                      android:name=".reminder.WaterReminderReceiver"
+                      android:exported="false" />
+          
+                  <receiver
+                      android:name=".reminder.BootReceiver"
+                      android:enabled="true"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.BOOT_COMPLETED" />
+                      </intent-filter>
+                  </receiver>
+              </application>
+          </manifest>
+          HYDRATE_FILE_EOF
+          mkdir -p app/src/main/java/com/example/hydratehour
+          cat > app/src/main/java/com/example/hydratehour/MainActivity.kt <<'HYDRATE_FILE_EOF'
+          package com.example.hydratehour
+          
+          import android.Manifest
+          import android.os.Build
+          import android.os.Bundle
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.rememberLauncherForActivityResult
+          import androidx.activity.compose.setContent
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.compose.foundation.background
+          import androidx.compose.foundation.layout.Arrangement
+          import androidx.compose.foundation.layout.Box
+          import androidx.compose.foundation.layout.Column
+          import androidx.compose.foundation.layout.Row
+          import androidx.compose.foundation.layout.Spacer
+          import androidx.compose.foundation.layout.fillMaxSize
+          import androidx.compose.foundation.layout.fillMaxWidth
+          import androidx.compose.foundation.layout.height
+          import androidx.compose.foundation.layout.padding
+          import androidx.compose.foundation.layout.size
+          import androidx.compose.foundation.layout.width
+          import androidx.compose.foundation.rememberScrollState
+          import androidx.compose.foundation.shape.CircleShape
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.foundation.verticalScroll
+          import androidx.compose.material3.Button
+          import androidx.compose.material3.ButtonDefaults
+          import androidx.compose.material3.Card
+          import androidx.compose.material3.CardDefaults
+          import androidx.compose.material3.LinearProgressIndicator
+          import androidx.compose.material3.MaterialTheme
+          import androidx.compose.material3.OutlinedButton
+          import androidx.compose.material3.Scaffold
+          import androidx.compose.material3.Surface
+          import androidx.compose.material3.Switch
+          import androidx.compose.material3.Text
+          import androidx.compose.material3.Typography
+          import androidx.compose.material3.lightColorScheme
+          import androidx.compose.runtime.Composable
+          import androidx.compose.runtime.getValue
+          import androidx.compose.runtime.mutableStateOf
+          import androidx.compose.runtime.remember
+          import androidx.compose.runtime.saveable.rememberSaveable
+          import androidx.compose.runtime.setValue
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.clip
+          import androidx.compose.ui.graphics.Brush
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.text.style.TextAlign
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import com.example.hydratehour.data.HydrationPreferences
+          import com.example.hydratehour.reminder.NotificationHelper
+          import com.example.hydratehour.reminder.ReminderScheduler
+          import kotlin.math.min
+          
+          class MainActivity : ComponentActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  NotificationHelper.ensureChannel(this)
+          
+                  setContent {
+                      HydrateHourTheme {
+                          HydrateHourScreen()
+                      }
+                  }
+              }
+          }
+          
+          @Composable
+          private fun HydrateHourScreen() {
+              val context = LocalContext.current
+              val preferences = remember { HydrationPreferences(context.applicationContext) }
+          
+              var remindersEnabled by rememberSaveable { mutableStateOf(preferences.remindersEnabled) }
+              var todayCount by rememberSaveable { mutableStateOf(preferences.todayCount) }
+              var statusText by rememberSaveable {
+                  mutableStateOf(
+                      if (remindersEnabled) "Hourly reminders are active."
+                      else "Reminders are turned off."
+                  )
+              }
+          
+              val permissionLauncher = rememberLauncherForActivityResult(
+                  contract = ActivityResultContracts.RequestPermission()
+              ) { granted ->
+                  if (granted) {
+                      preferences.setRemindersEnabled(true)
+                      ReminderScheduler.scheduleHourly(context)
+                      remindersEnabled = true
+                      statusText = "Hourly reminders are active."
+                  } else {
+                      preferences.setRemindersEnabled(false)
+                      remindersEnabled = false
+                      statusText = "Notification permission was denied. Enable it in Android settings to receive reminders."
+                  }
+              }
+          
+              fun requestPermissionThenEnable() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                      !NotificationHelper.canPostNotifications(context)
+                  ) {
+                      permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                  } else {
+                      preferences.setRemindersEnabled(true)
+                      ReminderScheduler.scheduleHourly(context)
+                      remindersEnabled = true
+                      statusText = "Hourly reminders are active."
+                  }
+              }
+          
+              Scaffold { innerPadding ->
+                  Column(
+                      modifier = Modifier
+                          .fillMaxSize()
+                          .background(
+                              Brush.verticalGradient(
+                                  listOf(Color(0xFFEAF8FF), Color(0xFFF9FDFF), Color.White)
+                              )
+                          )
+                          .padding(innerPadding)
+                          .verticalScroll(rememberScrollState())
+                          .padding(24.dp),
+                      horizontalAlignment = Alignment.CenterHorizontally
+                  ) {
+                      Spacer(modifier = Modifier.height(16.dp))
+                      WaterLogo()
+                      Spacer(modifier = Modifier.height(24.dp))
+          
+                      Text(
+                          text = "Hydrate Hour",
+                          style = MaterialTheme.typography.headlineLarge,
+                          fontWeight = FontWeight.ExtraBold,
+                          color = Color(0xFF083F66),
+                          textAlign = TextAlign.Center
+                      )
+                      Text(
+                          text = "A calm hourly reminder to drink water and keep your day balanced.",
+                          style = MaterialTheme.typography.bodyLarge,
+                          color = Color(0xFF4F6777),
+                          textAlign = TextAlign.Center,
+                          modifier = Modifier.padding(top = 8.dp)
+                      )
+          
+                      Spacer(modifier = Modifier.height(28.dp))
+          
+                      ReminderCard(
+                          remindersEnabled = remindersEnabled,
+                          statusText = statusText,
+                          onToggle = { enabled ->
+                              if (enabled) {
+                                  requestPermissionThenEnable()
+                              } else {
+                                  preferences.setRemindersEnabled(false)
+                                  ReminderScheduler.cancel(context)
+                                  remindersEnabled = false
+                                  statusText = "Reminders are turned off."
+                              }
+                          }
+                      )
+          
+                      Spacer(modifier = Modifier.height(18.dp))
+          
+                      ProgressCard(
+                          count = todayCount,
+                          goal = DAILY_GOAL,
+                          onDrinkWater = {
+                              todayCount = preferences.addCup()
+                          },
+                          onReset = {
+                              todayCount = preferences.resetToday()
+                          }
+                      )
+          
+                      Spacer(modifier = Modifier.height(18.dp))
+          
+                      OutlinedButton(
+                          onClick = {
+                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                  !NotificationHelper.canPostNotifications(context)
+                              ) {
+                                  permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                              } else {
+                                  NotificationHelper.showWaterReminder(context)
+                                  statusText = "Test reminder sent."
+                              }
+                          },
+                          modifier = Modifier.fillMaxWidth()
+                      ) {
+                          Text("Send test notification")
+                      }
+          
+                      Text(
+                          text = "Note: Android may batch reminders slightly to save battery.",
+                          style = MaterialTheme.typography.bodySmall,
+                          color = Color(0xFF6E8491),
+                          textAlign = TextAlign.Center,
+                          modifier = Modifier.padding(top = 16.dp)
+                      )
+                  }
+              }
+          }
+          
+          @Composable
+          private fun WaterLogo() {
+              Box(
+                  modifier = Modifier
+                      .size(112.dp)
+                      .clip(CircleShape)
+                      .background(
+                          Brush.radialGradient(
+                              listOf(Color(0xFFBEEFFF), Color(0xFF0477BF))
+                          )
+                      ),
+                  contentAlignment = Alignment.Center
+              ) {
+                  Text(text = "💧", fontSize = 56.sp)
+              }
+          }
+          
+          @Composable
+          private fun ReminderCard(
+              remindersEnabled: Boolean,
+              statusText: String,
+              onToggle: (Boolean) -> Unit
+          ) {
+              Card(
+                  modifier = Modifier.fillMaxWidth(),
+                  shape = RoundedCornerShape(28.dp),
+                  colors = CardDefaults.cardColors(containerColor = Color.White),
+                  elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+              ) {
+                  Row(
+                      modifier = Modifier
+                          .fillMaxWidth()
+                          .padding(22.dp),
+                      horizontalArrangement = Arrangement.SpaceBetween,
+                      verticalAlignment = Alignment.CenterVertically
+                  ) {
+                      Column(modifier = Modifier.weight(1f)) {
+                          Text(
+                              text = "Hourly reminders",
+                              style = MaterialTheme.typography.titleLarge,
+                              fontWeight = FontWeight.Bold,
+                              color = Color(0xFF12384F)
+                          )
+                          Text(
+                              text = statusText,
+                              style = MaterialTheme.typography.bodyMedium,
+                              color = Color(0xFF617785),
+                              modifier = Modifier.padding(top = 6.dp)
+                          )
+                          Text(
+                              text = "Every 1 hour",
+                              style = MaterialTheme.typography.labelLarge,
+                              color = Color(0xFF0477BF),
+                              modifier = Modifier.padding(top = 10.dp)
+                          )
+                      }
+                      Spacer(modifier = Modifier.width(16.dp))
+                      Switch(checked = remindersEnabled, onCheckedChange = onToggle)
+                  }
+              }
+          }
+          
+          @Composable
+          private fun ProgressCard(
+              count: Int,
+              goal: Int,
+              onDrinkWater: () -> Unit,
+              onReset: () -> Unit
+          ) {
+              val progress = min(count / goal.toFloat(), 1f)
+          
+              Card(
+                  modifier = Modifier.fillMaxWidth(),
+                  shape = RoundedCornerShape(28.dp),
+                  colors = CardDefaults.cardColors(containerColor = Color(0xFFF2FBFF)),
+                  elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+              ) {
+                  Column(modifier = Modifier.padding(22.dp)) {
+                      Row(
+                          modifier = Modifier.fillMaxWidth(),
+                          horizontalArrangement = Arrangement.SpaceBetween,
+                          verticalAlignment = Alignment.CenterVertically
+                      ) {
+                          Column {
+                              Text(
+                                  text = "Today’s water",
+                                  style = MaterialTheme.typography.titleLarge,
+                                  fontWeight = FontWeight.Bold,
+                                  color = Color(0xFF12384F)
+                              )
+                              Text(
+                                  text = "$count of $goal cups logged",
+                                  style = MaterialTheme.typography.bodyMedium,
+                                  color = Color(0xFF617785),
+                                  modifier = Modifier.padding(top = 6.dp)
+                              )
+                          }
+                          Text(
+                              text = "${(progress * 100).toInt()}%",
+                              style = MaterialTheme.typography.titleLarge,
+                              color = Color(0xFF0477BF),
+                              fontWeight = FontWeight.ExtraBold
+                          )
+                      }
+          
+                      Spacer(modifier = Modifier.height(16.dp))
+                      LinearProgressIndicator(
+                          progress = { progress },
+                          modifier = Modifier
+                              .fillMaxWidth()
+                              .height(10.dp)
+                              .clip(RoundedCornerShape(999.dp)),
+                          color = Color(0xFF0477BF),
+                          trackColor = Color(0xFFD7EFFA)
+                      )
+          
+                      Spacer(modifier = Modifier.height(18.dp))
+                      Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                          Button(
+                              onClick = onDrinkWater,
+                              modifier = Modifier.weight(1f),
+                              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0477BF))
+                          ) {
+                              Text("I drank water")
+                          }
+                          OutlinedButton(
+                              onClick = onReset,
+                              modifier = Modifier.weight(1f)
+                          ) {
+                              Text("Reset")
+                          }
+                      }
+                  }
+              }
+          }
+          
+          @Composable
+          private fun HydrateHourTheme(content: @Composable () -> Unit) {
+              val colors = lightColorScheme(
+                  primary = Color(0xFF0477BF),
+                  secondary = Color(0xFF00A6D6),
+                  background = Color(0xFFF9FDFF),
+                  surface = Color.White,
+                  onPrimary = Color.White,
+                  onSecondary = Color.White,
+                  onBackground = Color(0xFF12384F),
+                  onSurface = Color(0xFF12384F)
+              )
+          
+              MaterialTheme(
+                  colorScheme = colors,
+                  typography = Typography(),
+                  content = content
+              )
+          }
+          
+          private const val DAILY_GOAL = 8
+          HYDRATE_FILE_EOF
+          mkdir -p app/src/main/java/com/example/hydratehour/data
+          cat > app/src/main/java/com/example/hydratehour/data/HydrationPreferences.kt <<'HYDRATE_FILE_EOF'
+          package com.example.hydratehour.data
+          
+          import android.content.Context
+          import java.time.LocalDate
+          
+          class HydrationPreferences(context: Context) {
+              private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+          
+              val remindersEnabled: Boolean
+                  get() = prefs.getBoolean(KEY_REMINDERS_ENABLED, false)
+          
+              val todayCount: Int
+                  get() {
+                      ensureTodayIsCurrent()
+                      return prefs.getInt(KEY_TODAY_COUNT, 0)
+                  }
+          
+              fun setRemindersEnabled(enabled: Boolean) {
+                  prefs.edit().putBoolean(KEY_REMINDERS_ENABLED, enabled).apply()
+              }
+          
+              fun addCup(): Int {
+                  ensureTodayIsCurrent()
+                  val updatedCount = prefs.getInt(KEY_TODAY_COUNT, 0) + 1
+                  prefs.edit()
+                      .putInt(KEY_TODAY_COUNT, updatedCount)
+                      .putString(KEY_DATE, LocalDate.now().toString())
+                      .apply()
+                  return updatedCount
+              }
+          
+              fun resetToday(): Int {
+                  prefs.edit()
+                      .putInt(KEY_TODAY_COUNT, 0)
+                      .putString(KEY_DATE, LocalDate.now().toString())
+                      .apply()
+                  return 0
+              }
+          
+              private fun ensureTodayIsCurrent() {
+                  val today = LocalDate.now().toString()
+                  val savedDate = prefs.getString(KEY_DATE, null)
+                  if (savedDate != today) {
+                      prefs.edit()
+                          .putString(KEY_DATE, today)
+                          .putInt(KEY_TODAY_COUNT, 0)
+                          .apply()
+                  }
+              }
+          
+              private companion object {
+                  const val PREFS_NAME = "hydrate_hour_preferences"
+                  const val KEY_REMINDERS_ENABLED = "reminders_enabled"
+                  const val KEY_DATE = "date"
+                  const val KEY_TODAY_COUNT = "today_count"
+              }
+          }
+          HYDRATE_FILE_EOF
+          mkdir -p app/src/main/java/com/example/hydratehour/reminder
+          cat > app/src/main/java/com/example/hydratehour/reminder/BootReceiver.kt <<'HYDRATE_FILE_EOF'
+          package com.example.hydratehour.reminder
+          
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+          import com.example.hydratehour.data.HydrationPreferences
+          
+          class BootReceiver : BroadcastReceiver() {
+              override fun onReceive(context: Context, intent: Intent?) {
+                  if (intent?.action == Intent.ACTION_BOOT_COMPLETED) {
+                      val preferences = HydrationPreferences(context)
+                      if (preferences.remindersEnabled) {
+                          ReminderScheduler.scheduleHourly(context)
+                      }
+                  }
+              }
+          }
+          HYDRATE_FILE_EOF
+          mkdir -p app/src/main/java/com/example/hydratehour/reminder
+          cat > app/src/main/java/com/example/hydratehour/reminder/NotificationHelper.kt <<'HYDRATE_FILE_EOF'
+          package com.example.hydratehour.reminder
+          
+          import android.Manifest
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.content.Context
+          import android.content.Intent
+          import android.content.pm.PackageManager
+          import android.os.Build
+          import androidx.core.app.NotificationCompat
+          import androidx.core.app.NotificationManagerCompat
+          import androidx.core.content.ContextCompat
+          import com.example.hydratehour.MainActivity
+          import com.example.hydratehour.R
+          
+          object NotificationHelper {
+              private const val WATER_NOTIFICATION_ID = 6001
+              private const val CHANNEL_ID = "water_reminders"
+              private const val CHANNEL_NAME = "Water reminders"
+          
+              fun ensureChannel(context: Context) {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val channel = NotificationChannel(
+                          CHANNEL_ID,
+                          CHANNEL_NAME,
+                          NotificationManager.IMPORTANCE_DEFAULT
+                      ).apply {
+                          description = "Hourly reminders to drink water"
+                      }
+          
+                      val manager = context.getSystemService(NotificationManager::class.java)
+                      manager.createNotificationChannel(channel)
+                  }
+              }
+          
+              fun canPostNotifications(context: Context): Boolean {
+                  return Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                      ContextCompat.checkSelfPermission(
+                          context,
+                          Manifest.permission.POST_NOTIFICATIONS
+                      ) == PackageManager.PERMISSION_GRANTED
+              }
+          
+              fun showWaterReminder(context: Context) {
+                  if (!canPostNotifications(context)) return
+          
+                  ensureChannel(context)
+          
+                  val openAppIntent = Intent(context, MainActivity::class.java).apply {
+                      flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                  }
+          
+                  val contentIntent = PendingIntent.getActivity(
+                      context,
+                      0,
+                      openAppIntent,
+                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                  )
+          
+                  val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                      .setSmallIcon(R.drawable.ic_water_drop)
+                      .setContentTitle("Time to drink water")
+                      .setContentText("Take a small break, sip water, and keep your energy steady.")
+                      .setStyle(
+                          NotificationCompat.BigTextStyle().bigText(
+                              "Take a small break, sip water, and keep your energy steady. Your body will thank you."
+                          )
+                      )
+                      .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                      .setAutoCancel(true)
+                      .setContentIntent(contentIntent)
+                      .build()
+          
+                  NotificationManagerCompat.from(context).notify(WATER_NOTIFICATION_ID, notification)
+              }
+          }
+          HYDRATE_FILE_EOF
+          mkdir -p app/src/main/java/com/example/hydratehour/reminder
+          cat > app/src/main/java/com/example/hydratehour/reminder/ReminderScheduler.kt <<'HYDRATE_FILE_EOF'
+          package com.example.hydratehour.reminder
+          
+          import android.app.AlarmManager
+          import android.app.PendingIntent
+          import android.content.Context
+          import android.content.Intent
+          import android.os.SystemClock
+          
+          object ReminderScheduler {
+              private const val WATER_REMINDER_REQUEST_CODE = 4101
+          
+              fun scheduleHourly(context: Context) {
+                  val alarmManager = context.getSystemService(AlarmManager::class.java)
+                  val firstReminderAt = SystemClock.elapsedRealtime() + AlarmManager.INTERVAL_HOUR
+          
+                  alarmManager.setInexactRepeating(
+                      AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                      firstReminderAt,
+                      AlarmManager.INTERVAL_HOUR,
+                      pendingIntent(context)
+                  )
+              }
+          
+              fun cancel(context: Context) {
+                  val alarmManager = context.getSystemService(AlarmManager::class.java)
+                  alarmManager.cancel(pendingIntent(context))
+              }
+          
+              private fun pendingIntent(context: Context): PendingIntent {
+                  val intent = Intent(context, WaterReminderReceiver::class.java)
+                  return PendingIntent.getBroadcast(
+                      context,
+                      WATER_REMINDER_REQUEST_CODE,
+                      intent,
+                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                  )
+              }
+          }
+          HYDRATE_FILE_EOF
+          mkdir -p app/src/main/java/com/example/hydratehour/reminder
+          cat > app/src/main/java/com/example/hydratehour/reminder/WaterReminderReceiver.kt <<'HYDRATE_FILE_EOF'
+          package com.example.hydratehour.reminder
+          
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+          
+          class WaterReminderReceiver : BroadcastReceiver() {
+              override fun onReceive(context: Context, intent: Intent?) {
+                  NotificationHelper.showWaterReminder(context)
+              }
+          }
+          HYDRATE_FILE_EOF
+          mkdir -p app/src/main/res/drawable
+          cat > app/src/main/res/drawable/ic_launcher_foreground.xml <<'HYDRATE_FILE_EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path android:fillColor="#EAF8FF" android:pathData="M0,0h108v108h-108z" />
+              <path
+                  android:fillColor="#0477BF"
+                  android:pathData="M54,17C43,30 28,48 28,65C28,79.5 39.5,91 54,91C68.5,91 80,79.5 80,65C80,48 65,30 54,17Z" />
+              <path
+                  android:fillColor="#9BE2FF"
+                  android:pathData="M48,73C43,73 39,69 39,64C39,62 40.6,60.5 42.5,60.5C44.4,60.5 46,62 46,64C46,65.2 46.8,66 48,66C49.9,66 51.5,67.6 51.5,69.5C51.5,71.4 49.9,73 48,73Z" />
+          </vector>
+          HYDRATE_FILE_EOF
+          mkdir -p app/src/main/res/drawable
+          cat > app/src/main/res/drawable/ic_water_drop.xml <<'HYDRATE_FILE_EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#0477BF"
+                  android:pathData="M12,2C9.1,5.4 5,10.4 5,15.1C5,19 8.1,22 12,22C15.9,22 19,19 19,15.1C19,10.4 14.9,5.4 12,2ZM12,20C9.2,20 7,17.9 7,15.1C7,12.2 9.3,8.6 12,5.1C14.7,8.6 17,12.2 17,15.1C17,17.9 14.8,20 12,20Z" />
+              <path
+                  android:fillColor="#7CD3FF"
+                  android:pathData="M12,18C10.3,18 9,16.7 9,15C9,14.4 9.4,14 10,14C10.6,14 11,14.4 11,15C11,15.6 11.4,16 12,16C12.6,16 13,16.4 13,17C13,17.6 12.6,18 12,18Z" />
+          </vector>
+          HYDRATE_FILE_EOF
+          mkdir -p app/src/main/res/mipmap-anydpi-v26
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'HYDRATE_FILE_EOF'
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/hydrate_surface" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          HYDRATE_FILE_EOF
+          mkdir -p app/src/main/res/mipmap-anydpi-v26
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml <<'HYDRATE_FILE_EOF'
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/hydrate_surface" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          HYDRATE_FILE_EOF
+          mkdir -p app/src/main/res/values
+          cat > app/src/main/res/values/colors.xml <<'HYDRATE_FILE_EOF'
+          <resources>
+              <color name="hydrate_blue">#0477BF</color>
+              <color name="hydrate_blue_dark">#035E96</color>
+              <color name="hydrate_surface">#F4FBFF</color>
+          </resources>
+          HYDRATE_FILE_EOF
+          mkdir -p app/src/main/res/values
+          cat > app/src/main/res/values/strings.xml <<'HYDRATE_FILE_EOF'
+          <resources>
+              <string name="app_name">Hydrate Hour</string>
+          </resources>
+          HYDRATE_FILE_EOF
+          mkdir -p app/src/main/res/values
+          cat > app/src/main/res/values/themes.xml <<'HYDRATE_FILE_EOF'
+          <resources>
+              <style name="Theme.HydrateHour" parent="android:style/Theme.Material.Light.NoActionBar">
+                  <item name="android:windowLightStatusBar">true</item>
+                  <item name="android:statusBarColor">@color/hydrate_surface</item>
+                  <item name="android:navigationBarColor">@color/hydrate_surface</item>
+                  <item name="android:fontFamily">sans</item>
+              </style>
+          </resources>
+          HYDRATE_FILE_EOF
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HydrateHour-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk

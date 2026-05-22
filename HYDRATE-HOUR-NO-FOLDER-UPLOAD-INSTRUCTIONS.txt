@@ -1,0 +1,22 @@
+HYDRATE HOUR — NO FOLDER UPLOAD METHOD
+
+You only need to create ONE file in GitHub. Do not upload a folder.
+
+1. Create a new empty GitHub repository.
+2. In the repo, tap/click Add file > Create new file.
+3. In the file name box, type exactly:
+   .github/workflows/build-apk.yml
+4. Open hydrate-hour-one-file-build-apk.yml from this download and copy all its text.
+5. Paste it into GitHub.
+6. Tap/click Commit changes.
+7. Open the Actions tab.
+8. Open "Build Hydrate Hour APK - One File Setup".
+9. Tap/click Run workflow.
+10. When it finishes, open the run and download the artifact named:
+    HydrateHour-debug-apk
+11. Inside that artifact is app-debug.apk. Install it on your Android phone.
+
+Important:
+- This is a debug APK for testing.
+- Android may warn you because it is not from Google Play. That is normal for manually installed APKs.
+- For Google Play publishing later, you need a signed release APK/AAB.
